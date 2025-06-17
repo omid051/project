@@ -3,7 +3,7 @@ if (!defined('ABSPATH')) { exit; }
 
 class HS_Ajax {
     private $helpers, $fields;
-    private $current_user_id_for_upload = 0; // Property to hold user ID during upload
+    private $current_user_id_for_upload = 0;
 
     public function __construct($helpers, $fields) {
         $this->helpers = $helpers;
@@ -16,7 +16,6 @@ class HS_Ajax {
         foreach ($actions as $action) {
             add_action('wp_ajax_hs_' . $action, [$this, $action]);
         }
-        
         add_filter('ajax_query_attachments_args', [$this, 'hide_private_attachments_from_media_library']);
     }
 
@@ -25,12 +24,10 @@ class HS_Ajax {
         $user_id = get_current_user_id();
         if (!$user_id) {
             wp_send_json_error();
-            return;
         }
         
         $user = get_userdata($user_id);
         $user_roles = (array) $user->roles;
-
         $is_editable = in_array('subscriber', $user_roles) || in_array('hs_rejected', $user_roles);
         $rejection_reason_raw = get_user_meta($user_id, 'hs_rejection_reason', true);
         $rejection_reason_html = !empty($rejection_reason_raw) ? nl2br(esc_html($rejection_reason_raw)) : '';
@@ -45,24 +42,23 @@ class HS_Ajax {
     public function save_profile_form() {
         check_ajax_referer('hs_ajax_nonce', 'nonce');
         $this->current_user_id_for_upload = get_current_user_id();
+        if (!$this->current_user_id_for_upload) {
+            wp_send_json_error(['message' => 'خطای شناسایی کاربر.']);
+            return;
+        }
+
         $form_data = [];
         if(isset($_POST['form_data'])) {
             parse_str($_POST['form_data'], $form_data);
         }
-
-        if (!empty($form_data['national_code'])) {
-            $national_code = sanitize_text_field($form_data['national_code']);
-            $existing_users = get_users(['meta_key' => 'hs_national_code', 'meta_value' => $national_code, 'exclude' => [$this->current_user_id_for_upload], 'fields' => 'ID']);
-            if (!empty($existing_users)) {
-                wp_send_json_error(['message' => 'این کد ملی قبلاً در سیستم ثبت شده است.']);
-                return;
-            }
-        }
-
+        
+        // Save text-based fields first
         $all_field_groups = $this->fields->get_fields();
         foreach ($all_field_groups as $group) {
             foreach ($group['fields'] as $field_key => $attrs) {
-                if (in_array($attrs['type'], ['range_select'])) {
+                if ($attrs['type'] == 'file') continue; // Skip file fields
+                // ... (rest of the field saving logic remains the same)
+                 if (in_array($attrs['type'], ['range_select'])) {
                     $start_key = $field_key . '_start'; $end_key = $field_key . '_end';
                     if (isset($form_data[$start_key])) { update_user_meta($this->current_user_id_for_upload, 'hs_' . $start_key, sanitize_text_field($form_data[$start_key])); }
                     if (isset($form_data[$end_key])) { update_user_meta($this->current_user_id_for_upload, 'hs_' . $end_key, sanitize_text_field($form_data[$end_key])); }
@@ -89,39 +85,27 @@ class HS_Ajax {
             }
         }
 
+        // **NEW & REWRITTEN**: Handle file uploads securely and robustly
         if (!empty($_FILES)) {
             require_once(ABSPATH . 'wp-admin/includes/file.php');
-            require_once(ABSPATH . 'wp-admin/includes/image.php');
-            require_once(ABSPATH . 'wp-admin/includes/media.php');
-            
             add_filter('wp_handle_upload_prefilter', [$this, 'rename_secure_file'], 10, 1);
-
+            
             foreach ($_FILES as $file_key => $file) {
                 if (isset($file['name']) && $file['size'] > 0) {
-                    $upload_overrides = ['test_form' => false];
-                    $upload = wp_handle_upload($file, $upload_overrides);
+                    $upload = wp_handle_upload($file, ['test_form' => false]);
 
                     if ($upload && !isset($upload['error'])) {
-                        $moved_file_data = $this->move_to_secure_directory($upload['file']);
-                        
-                        $attachment = [
-                            'guid'           => $moved_file_data['url'],
-                            'post_mime_type' => $upload['type'],
-                            'post_title'     => preg_replace( '/\.[^.]+$/', '', basename( $moved_file_data['file'] ) ),
-                            'post_content'   => '',
-                            'post_status'    => 'inherit'
-                        ];
-                        
-                        $attach_id = wp_insert_attachment($attachment, $moved_file_data['relative_path']);
-                        if (!is_wp_error($attach_id)) {
-                            update_post_meta($attach_id, '_hs_private_attachment', true);
-                            
-                            $attach_data = wp_generate_attachment_metadata($attach_id, $moved_file_data['file']);
-                            wp_update_attachment_metadata($attach_id, $attach_data);
-                            update_user_meta($this->current_user_id_for_upload, 'hs_' . $file_key, $attach_id);
+                        $moved_file_data = $this->move_to_private_dir($upload['file']);
+                        if ($moved_file_data) {
+                            $file_info = [
+                                'file_name'     => $moved_file_data['filename'],
+                                'mime_type'     => $upload['type'],
+                                'original_name' => $file['name'] // The original name before renaming
+                            ];
+                            update_user_meta($this->current_user_id_for_upload, 'hs_' . $file_key, $file_info);
                         }
                     } else {
-                        wp_send_json_error(['message' => $upload['error']]);
+                        wp_send_json_error(['message' => 'خطا در آپلود فایل: ' . ($upload['error'] ?? 'ناشناخته')]);
                         return;
                     }
                 }
@@ -134,7 +118,6 @@ class HS_Ajax {
             $user = new WP_User($this->current_user_id_for_upload);
             $user->set_role('hs_pending');
             delete_user_meta($this->current_user_id_for_upload, 'hs_rejection_reason');
-            clean_user_cache($this->current_user_id_for_upload);
         }
         wp_send_json_success(['message' => 'اطلاعات با موفقیت ذخیره شد.']);
     }
@@ -144,9 +127,7 @@ class HS_Ajax {
         if (!$user_id) return $file;
 
         $form_data = [];
-        if(isset($_POST['form_data'])) {
-            parse_str($_POST['form_data'], $form_data);
-        }
+        parse_str($_POST['form_data'] ?? '', $form_data);
         $national_code = !empty($form_data['national_code']) ? sanitize_text_field($form_data['national_code']) : 'user_' . $user_id;
 
         $file_index_key = 'hs_uploaded_file_index';
@@ -162,86 +143,69 @@ class HS_Ajax {
         return $file;
     }
 
-    private function move_to_secure_directory($temp_file_path) {
-        $upload_dir = wp_upload_dir();
-        $secure_dir_name = HS_SECURE_UPLOADS_DIR_NAME;
-        $secure_dir_path = trailingslashit($upload_dir['basedir']) . $secure_dir_name;
+    private function move_to_private_dir($temp_file_path) {
+        $private_dir_name = HS_PRIVATE_DOCS_DIR_NAME;
+        $wp_upload_dir = wp_get_upload_dir();
+        $private_dir_path = trailingslashit($wp_upload_dir['basedir']) . $private_dir_name;
         
-        if (!is_dir($secure_dir_path)) {
-            wp_mkdir_p($secure_dir_path);
-            $htaccess_path = trailingslashit($secure_dir_path) . '.htaccess';
+        if (!is_dir($private_dir_path)) {
+            wp_mkdir_p($private_dir_path);
+            $htaccess_path = trailingslashit($private_dir_path) . '.htaccess';
             if (!file_exists($htaccess_path)) {
                 @file_put_contents($htaccess_path, 'Deny from all');
             }
         }
         
         $filename = basename($temp_file_path);
-        $new_file_path = trailingslashit($secure_dir_path) . $filename;
+        $new_file_path = trailingslashit($private_dir_path) . $filename;
         
         if (rename($temp_file_path, $new_file_path)) {
-            return [
-                'file' => $new_file_path, // The new absolute path
-                'url' => '', // URL is empty because it's not publicly accessible
-                'relative_path' => trailingslashit($secure_dir_name) . $filename // The path relative to the uploads dir
-            ];
+            return ['filename' => $filename];
         }
         
         return false;
     }
     
-    public function hide_private_attachments_from_media_library($query) {
-        // Only apply this logic in the admin area for AJAX requests
-        if (is_admin() && defined('DOING_AJAX') && DOING_AJAX) {
-            $query['meta_query'][] = [
-                'key'     => '_hs_private_attachment',
-                'compare' => 'NOT EXISTS',
-            ];
-        }
-        return $query;
-    }
+    public function hide_private_attachments_from_media_library($query) { return $query; } // No longer needed, kept empty for safety
 
-    /**
-     * **FINAL FIX**: Manually constructs the file path to prevent errors and
-     * provides a clear error message instead of a white screen.
-     */
     public function serve_secure_file() {
         check_ajax_referer('hs_serve_secure_file_nonce_action');
         if (!current_user_can('manage_options')) {
             wp_die('عدم دسترسی.', 'خطای دسترسی', ['response' => 403]);
         }
         
-        $file_id = isset($_GET['file_id']) ? intval($_GET['file_id']) : 0;
-        if (!$file_id) {
-            wp_die('شناسه فایل نامعتبر است.');
+        $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
+        $doc_key = isset($_GET['doc_key']) ? sanitize_text_field($_GET['doc_key']) : '';
+
+        if (!$user_id || !$doc_key) {
+            wp_die('اطلاعات درخواست نامعتبر است.');
         }
 
-        // Get the path relative to the uploads directory. e.g., "hamtam_secure_uploads/filename.jpg"
-        $relative_path = get_post_meta($file_id, '_wp_attached_file', true);
-        if (empty($relative_path)) {
-            wp_die('اطلاعات متادیتای فایل یافت نشد.');
+        $file_info = get_user_meta($user_id, $doc_key, true);
+        if (empty($file_info) || !is_array($file_info) || empty($file_info['file_name'])) {
+            wp_die('فایل برای این کاربر یافت نشد.');
         }
 
-        $upload_dir = wp_upload_dir();
-        $absolute_path = trailingslashit($upload_dir['basedir']) . $relative_path;
+        $private_dir_name = HS_PRIVATE_DOCS_DIR_NAME;
+        $wp_upload_dir = wp_get_upload_dir();
+        $private_dir_path = trailingslashit($wp_upload_dir['basedir']) . $private_dir_name;
+        $absolute_path = trailingslashit($private_dir_path) . $file_info['file_name'];
 
         if (file_exists($absolute_path)) {
-            header('Content-Type: ' . get_post_mime_type($file_id));
-            header('Content-Disposition: inline; filename="' . basename($absolute_path) . '"');
+            header('Content-Type: ' . esc_attr($file_info['mime_type']));
+            header('Content-Disposition: inline; filename="' . esc_attr($file_info['original_name']) . '"');
             header('Content-Length: ' . filesize($absolute_path));
             header('Cache-Control: no-cache, must-revalidate');
+            header('Pragma: no-cache');
             header('Expires: 0');
             
-            // Clean output buffer before reading the file
-            if (ob_get_level()) {
-                ob_end_clean();
-            }
+            if (ob_get_level()) ob_end_clean();
             
             @readfile($absolute_path);
             exit;
         } else {
             status_header(404);
-            // Provide a useful debug message instead of a white screen
-            wp_die('فایل در سرور یافت نشد. مسیر بررسی شده: ' . esc_html($absolute_path));
+            wp_die('فایل در سرور یافت نشد. این خطا ممکن است به دلیل مشکلات سطح دسترسی پوشه‌ها نیز باشد.');
         }
     }
 

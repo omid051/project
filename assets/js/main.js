@@ -69,7 +69,7 @@
         const updateFormState = (isLocked) => {
             form.data('locked', isLocked);
             form.find('input, select, textarea').prop('disabled', isLocked);
-            $('.hs-navigation-buttons').toggle(!isLocked);
+            updateButtonVisibility(); // **FIXED**: Call visibility function directly
         };
         
         const refreshUserStatus = () => {
@@ -125,9 +125,14 @@
         };
 
         const showStep = (step) => { $('.hs-form-step').hide(); $('#hs-step-' + step).show(); updateButtonVisibility(); };
-        const updateButtonVisibility = () => { let isLocked = form.data('locked'); prevBtn.toggle(currentStep > 1 && !isLocked); nextBtn.toggle(currentStep < totalSteps && !isLocked); submitBtn.toggle(currentStep === totalSteps && !isLocked); };
+        const updateButtonVisibility = () => {
+            let isLocked = form.data('locked');
+            prevBtn.toggle(currentStep > 1); // **FIXED**: Show if not on the first step
+            nextBtn.toggle(currentStep < totalSteps); // **FIXED**: Show if not on the last step
+            submitBtn.toggle(currentStep === totalSteps && !isLocked); // **FIXED**: Show submit only on last step and if not locked
+        };
         
-        nextBtn.on('click', () => { if (form.data('locked')) return; if (validateStep(currentStep)) saveStepData(false); });
+        nextBtn.on('click', () => { if (form.data('locked')) { currentStep++; showStep(currentStep); return; } if (validateStep(currentStep)) saveStepData(false); });
         prevBtn.on('click', () => { if (currentStep > 1) { currentStep--; showStep(currentStep); } });
         form.on('submit', (e) => { e.preventDefault(); if (form.data('locked')) return; if (validateAllSteps()) saveStepData(true); });
         
@@ -156,7 +161,7 @@
                     } else { showNotification(res.data?.message || hs_ajax_data.messages.error_saving, 'error'); }
                 },
                 error: () => { showNotification(hs_ajax_data.messages.error_saving, 'error'); },
-                complete: () => { loader.hide(); if (!form.data('locked')) { prevBtn.add(nextBtn).add(submitBtn).prop('disabled', false); updateButtonVisibility(); } }
+                complete: () => { loader.hide(); if (!form.data('locked')) { prevBtn.add(nextBtn).add(submitBtn).prop('disabled', false); updateButtonVisibility(); } else { updateButtonVisibility(); } }
             });
         }
         
@@ -238,7 +243,7 @@
         });
     });
     
-    $(document).on('click', '.hs-profile-actions button[data-action], .hs-requests-list button[data-action]', function(e) {
+    $(document).on('click', '.hs-profile-actions button[data-action], .hs-requests-list button[data-action], table button[data-action]', function(e) {
         e.preventDefault();
         const button = $(this);
         const action = button.data('action');
@@ -246,13 +251,13 @@
         const originalText = button.text();
         button.data('original-text', originalText);
         showConfirm(action === 'accept' ? 'آیا این درخواست را تایید می‌کنید؟' : 'آیا این درخواست را رد می‌کنید؟', () => {
-            button.closest('li, .hs-profile-actions').find('button').prop('disabled', true);
+            button.closest('tr, li, .hs-profile-actions').find('button').prop('disabled', true);
             button.text('صبر کنید...');
             $.post(hs_ajax_data.ajax_url, { action: 'hs_handle_request_action', nonce: hs_ajax_data.nonce, request_id: requestId, request_action: action })
             .done((res) => {
                 if (res.success) { showNotification(res.data.message, 'success'); setTimeout(() => window.location.reload(), 2000);
-                } else { showNotification('خطا: ' + (res.data.message || 'مشکلی رخ داد.'), 'error'); button.closest('li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); }
-            }).fail(() => { showNotification('خطای سرور.', 'error'); button.closest('li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); });
+                } else { showNotification('خطا: ' + (res.data.message || 'مشکلی رخ داد.'), 'error'); button.closest('tr, li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); }
+            }).fail(() => { showNotification('خطای سرور.', 'error'); button.closest('tr, li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); });
         });
     });
 
@@ -281,5 +286,20 @@
             } else { showNotification('خطا: ' + (res.data.message || 'ناشناخته'), 'error'); button.prop('disabled', false).text('تایید و لغو'); }
         }).fail(() => { showNotification('خطای سرور.', 'error'); button.prop('disabled', false).text('تایید و لغو'); });
     });
+
+    // **FIXED**: Added event handlers for cancellation modal close button and overlay click
+    $(document).on('click', '#hs-cancellation-modal .hs-close-button, #hs-cancellation-modal', function(e) {
+        if (e.target === this || $(e.target).hasClass('hs-close-button')) {
+            $('#hs-cancellation-modal').removeClass('active').fadeOut(200, function() {
+                $(this).remove();
+            });
+        }
+    });
+    
+    // Prevent modal from closing when clicking on the content itself
+    $(document).on('click', '.hs-modal-content', function(e){
+        e.stopPropagation();
+    });
+
 
 })(jQuery);

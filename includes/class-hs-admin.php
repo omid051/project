@@ -16,8 +16,8 @@ class HS_Admin {
     public function enqueue_scripts($hook) {
         if (strpos($hook, 'hamtam-') === false && $hook !== 'user-edit.php' && $hook !== 'profile.php') { return; }
         
-        wp_enqueue_style('hs-admin-styles', HS_PLUGIN_URL . 'assets/css/admin.css', [], '6.0.0');
-        wp_enqueue_script('hs-admin-js', HS_PLUGIN_URL . 'assets/js/admin.js', ['jquery'], '6.0.0', true);
+        wp_enqueue_style('hs-admin-styles', HS_PLUGIN_URL . 'assets/css/admin.css', [], '6.1.0');
+        wp_enqueue_script('hs-admin-js', HS_PLUGIN_URL . 'assets/js/admin.js', ['jquery'], '6.1.0', true);
         wp_localize_script('hs-admin-js', 'hs_admin_data', ['nonce' => wp_create_nonce('hs_admin_nonce')]);
     }
 
@@ -154,7 +154,7 @@ class HS_Admin {
                         $file_id = get_user_meta($user->ID, 'hs_' . $key, true);
                         if($file_id) {
                             $has_docs = true;
-                            // **FIXED**: Using a more specific nonce name and action to avoid conflicts
+                            // **FIXED**: Using a more robust nonce for the secure file link
                             $nonce = wp_create_nonce('hs_serve_secure_file_nonce_action');
                             $file_url = admin_url('admin-ajax.php?action=hs_serve_secure_file&file_id=' . $file_id . '&_wpnonce=' . $nonce);
                             echo '<p><strong>' . esc_html($attrs['label']) . ':</strong> <a href="' . esc_url($file_url) . '" target="_blank">مشاهده فایل</a></p>';

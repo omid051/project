@@ -59,7 +59,6 @@ class HS_Ajax {
         $all_field_groups = $this->fields->get_fields();
         foreach ($all_field_groups as $group) {
             foreach ($group['fields'] as $field_key => $attrs) {
-                // **FIXED**: Correctly save all field types, especially date components
                 if (in_array($attrs['type'], ['range_select'])) {
                     $start_key = $field_key . '_start'; $end_key = $field_key . '_end';
                     if (isset($form_data[$start_key])) { update_user_meta($user_id, 'hs_' . $start_key, sanitize_text_field($form_data[$start_key])); }
@@ -94,10 +93,29 @@ class HS_Ajax {
                 if (!empty($file['name'])) {
                     $upload = wp_handle_upload($file, ['test_form' => false]);
                     if ($upload && !isset($upload['error'])) {
-                        $attach_id = wp_insert_attachment(['guid' => $upload['url'], 'post_mime_type' => $upload['type'], 'post_title' => preg_replace('/\.[^.]+$/', '', basename($file['name'])), 'post_content' => '', 'post_status' => 'inherit'], $upload['file']);
-                        wp_update_attachment_metadata($attach_id, wp_generate_attachment_metadata($attach_id, $upload['file']));
+                        // The file path returned by wp_handle_upload will be relative to the uploads dir
+                        // e.g., 'hamtam_secure_uploads/2025/06/my-image.png'
+                        $file_path = $upload['file'];
+                        $file_name = basename($file_path);
+                        $file_type = wp_check_filetype($file_name, null);
+
+                        // Prepare an array of post data for the attachment.
+                        $attachment = [
+                            'guid'           => $upload['url'], 
+                            'post_mime_type' => $file_type['type'],
+                            'post_title'     => preg_replace('/\.[^.]+$/', '', $file_name),
+                            'post_content'   => '',
+                            'post_status'    => 'inherit'
+                        ];
+                        
+                        $attach_id = wp_insert_attachment($attachment, $file_path);
+                        $attach_data = wp_generate_attachment_metadata($attach_id, $file_path);
+                        wp_update_attachment_metadata($attach_id, $attach_data);
                         update_user_meta($user_id, 'hs_' . $file_key, $attach_id);
-                    } else { wp_send_json_error(['message' => $upload['error'] ?? 'خطا در آپلود فایل.']); return; }
+                    } else { 
+                        wp_send_json_error(['message' => $upload['error'] ?? 'خطا در آپلود فایل.']); 
+                        return; 
+                    }
                 }
             }
             remove_filter('upload_dir', [$this, 'set_secure_upload_dir']);
@@ -113,45 +131,44 @@ class HS_Ajax {
         wp_send_json_success(['message' => 'اطلاعات با موفقیت ذخیره شد.']);
     }
 
+    /**
+     * **FIXED**: Correctly modify the upload directory to include a secure subfolder
+     * while preserving WordPress's year/month structure.
+     */
     public function set_secure_upload_dir($dir) {
-        $secure_path = trailingslashit($dir['basedir']) . HS_SECURE_UPLOADS_DIR_NAME;
-        $secure_url = trailingslashit($dir['baseurl']) . HS_SECURE_UPLOADS_DIR_NAME;
-        return ['path' => $secure_path, 'url' => $secure_url, 'subdir' => '','basedir' => $secure_path,'baseurl' => $secure_url,'error' => false];
+        $secure_subdir = '/' . HS_SECURE_UPLOADS_DIR_NAME . ($dir['subdir'] ?? '');
+    
+        $dir['path'] = $dir['basedir'] . $secure_subdir;
+        $dir['url'] = $dir['baseurl'] . $secure_subdir;
+        $dir['subdir'] = $secure_subdir;
+    
+        return $dir;
     }
     
+    /**
+     * **FIXED**: Robustly serve secure files by correctly constructing the file path.
+     */
     public function serve_secure_file() {
-        // **FIXED**: Robust file serving logic
         check_ajax_referer('hs_serve_secure_file_nonce_action');
         if (!current_user_can('manage_options')) { wp_die('Access Denied'); }
         
         $file_id = isset($_GET['file_id']) ? intval($_GET['file_id']) : 0;
         if(!$file_id) { wp_die('Invalid file ID.'); }
 
-        $relative_path = get_post_meta($file_id, '_wp_attached_file', true);
-        if (!$relative_path) {
-            wp_die('File metadata not found.');
-        }
-
-        $upload_dir = wp_upload_dir();
-        $secure_dir_path = trailingslashit($upload_dir['basedir']) . HS_SECURE_UPLOADS_DIR_NAME;
-        
-        // The relative path might contain year/month folders. We need to append it correctly.
-        $file_path = $secure_dir_path . '/' . $relative_path;
-        
-        // Some servers might store the full path, some relative. We check both.
-        if (!file_exists($file_path)) {
-             $file_path = get_attached_file($file_id); // Fallback to original method
-        }
+        $file_path = get_attached_file($file_id);
 
         if ($file_path && file_exists($file_path)) {
             header('Content-Type: ' . get_post_mime_type($file_id));
             header('Content-Disposition: inline; filename="' . basename($file_path) . '"');
             header('Content-Length: ' . filesize($file_path));
+            // Prevent caching of sensitive files
+            header("Cache-Control: no-cache, must-revalidate");
+            header("Expires: 0");
             @readfile($file_path);
             exit;
         } else {
             status_header(404);
-            wp_die('File not found on server.');
+            wp_die('فایل یافت نشد یا دسترسی به آن امکان‌پذیر نیست.');
         }
     }
 

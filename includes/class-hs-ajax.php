@@ -26,16 +26,16 @@ class HS_Ajax {
         }
         
         $user = get_userdata($user_id);
-        $user_roles_assoc = (array) $user->roles;
-        $user_roles_list = array_keys($user_roles_assoc);
+        $user_roles = (array) $user->roles;
 
-        $is_editable = (in_array('subscriber', $user_roles_list) || in_array('hs_rejected', $user_roles_list));
+        // **FIXED**: Simplified role checking
+        $is_editable = in_array('subscriber', $user_roles) || in_array('hs_rejected', $user_roles);
         $rejection_reason_raw = get_user_meta($user_id, 'hs_rejection_reason', true);
         $rejection_reason_html = !empty($rejection_reason_raw) ? nl2br(esc_html($rejection_reason_raw)) : '';
 
         wp_send_json_success([
             'is_editable' => $is_editable,
-            'roles' => $user_roles_list,
+            'roles' => $user_roles,
             'rejection_reason_html' => $rejection_reason_html
         ]);
     }
@@ -43,13 +43,14 @@ class HS_Ajax {
     public function save_profile_form() {
         check_ajax_referer('hs_ajax_nonce', 'nonce');
         $user_id = get_current_user_id();
-        $form_data = $_POST;
+        parse_str($_POST['form_data'], $form_data); // Parse form data string
 
         if (!empty($form_data['national_code'])) {
             $national_code = sanitize_text_field($form_data['national_code']);
             $existing_users = get_users(['meta_key' => 'hs_national_code', 'meta_value' => $national_code, 'exclude' => [$user_id], 'fields' => 'ID']);
             if (!empty($existing_users)) {
-                wp_send_json_error(['message' => 'این کد ملی قبلاً در سیستم ثبت شده است.']);
+                // **FIXED**: Send a specific error key for duplicate national code
+                wp_send_json_error(['message' => 'این کد ملی قبلاً در سیستم ثبت شده است.', 'error_id' => 'duplicate_national_code']);
                 return;
             }
         }
@@ -79,6 +80,7 @@ class HS_Ajax {
         }
 
         if (!empty($_FILES)) {
+            // The file handling part remains the same
             add_filter('upload_dir', [$this, 'set_secure_upload_dir']);
             require_once(ABSPATH . 'wp-admin/includes/file.php'); require_once(ABSPATH . 'wp-admin/includes/image.php'); require_once(ABSPATH . 'wp-admin/includes/media.php');
             foreach ($_FILES as $file_key => $file) {

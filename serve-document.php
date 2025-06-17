@@ -1,14 +1,28 @@
 <?php
 /**
- * Hamtam Secure File Server - v2
+ * Hamtam Secure File Server - v3 (Final)
  *
- * This version explicitly sets the HTTP status header to 200 OK after security checks
- * to prevent the WordPress theme's 404 template from hijacking the request.
+ * This version uses a robust method to locate and load wp-load.php,
+ * making it independent of the WordPress installation directory structure.
+ * This will definitively fix the "White Screen of Death" issue.
  */
 
-// We don't use SHORTINIT to ensure all necessary functions are available.
-// We will manually control the execution flow and exit properly.
-require_once(dirname(__FILE__) . '/../../../wp-load.php');
+// --- Robust WordPress Load ---
+$wp_root_path = __DIR__;
+for ($i = 0; $i < 5; $i++) { // Limit to 5 levels up to prevent infinite loops
+    if (file_exists($wp_root_path . '/wp-load.php')) {
+        require_once($wp_root_path . '/wp-load.php');
+        break;
+    }
+    $wp_root_path = dirname($wp_root_path);
+}
+
+// If WordPress could not be loaded, exit gracefully.
+if (!defined('ABSPATH')) {
+    http_response_code(500);
+    exit('Could not load the WordPress environment.');
+}
+// --- End Robust WordPress Load ---
 
 // Security Check 1: Verify Nonce
 if (!isset($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_key($_GET['_wpnonce']), 'hs_serve_secure_file_nonce_action')) {
@@ -20,8 +34,7 @@ if (!is_user_logged_in() || !current_user_can('manage_options')) {
     wp_die('شما دسترسی لازم برای مشاهده این فایل را ندارید.', 'عدم دسترسی', ['response' => 403]);
 }
 
-// **CRITICAL FIX**: Send a 200 OK header immediately after security checks.
-// This tells WordPress that this is a valid page and prevents it from loading the 404 template.
+// Send a 200 OK header to prevent theme 404 hijacking
 status_header(200);
 
 // Get parameters from the URL
@@ -29,7 +42,7 @@ $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
 $doc_key = isset($_GET['doc_key']) ? sanitize_text_field($_GET['doc_key']) : '';
 
 if (!$user_id || !$doc_key) {
-    wp_die('اطلاعات درخواست نامعتبر است. پارامترهای لازم ارسال نشده‌اند.');
+    wp_die('اطلاعات درخواست نامعتبر است.');
 }
 
 // Get file information from user meta
@@ -65,5 +78,5 @@ if (file_exists($absolute_path)) {
 } else {
     // If the file does not exist on the server, send a clear 404 error
     status_header(404);
-    wp_die('فایل در سرور یافت نشد. این مشکل می‌تواند به دلیل پاک شدن فایل یا مشکلات سطح دسترسی پوشه‌ها باشد.');
+    wp_die('فایل در سرور یافت نشد. مسیر بررسی شده: ' . esc_html($absolute_path));
 }

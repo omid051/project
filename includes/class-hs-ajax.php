@@ -28,7 +28,6 @@ class HS_Ajax {
         $user = get_userdata($user_id);
         $user_roles = (array) $user->roles;
 
-        // **FIXED**: Simplified role checking
         $is_editable = in_array('subscriber', $user_roles) || in_array('hs_rejected', $user_roles);
         $rejection_reason_raw = get_user_meta($user_id, 'hs_rejection_reason', true);
         $rejection_reason_html = !empty($rejection_reason_raw) ? nl2br(esc_html($rejection_reason_raw)) : '';
@@ -43,14 +42,16 @@ class HS_Ajax {
     public function save_profile_form() {
         check_ajax_referer('hs_ajax_nonce', 'nonce');
         $user_id = get_current_user_id();
-        parse_str($_POST['form_data'], $form_data); // Parse form data string
+        $form_data = [];
+        if(isset($_POST['form_data'])) {
+            parse_str($_POST['form_data'], $form_data);
+        }
 
         if (!empty($form_data['national_code'])) {
             $national_code = sanitize_text_field($form_data['national_code']);
             $existing_users = get_users(['meta_key' => 'hs_national_code', 'meta_value' => $national_code, 'exclude' => [$user_id], 'fields' => 'ID']);
             if (!empty($existing_users)) {
-                // **FIXED**: Send a specific error key for duplicate national code
-                wp_send_json_error(['message' => 'این کد ملی قبلاً در سیستم ثبت شده است.', 'error_id' => 'duplicate_national_code']);
+                wp_send_json_error(['message' => 'این کد ملی قبلاً در سیستم ثبت شده است.']);
                 return;
             }
         }
@@ -64,11 +65,17 @@ class HS_Ajax {
                     if (isset($form_data[$end_key])) { update_user_meta($user_id, 'hs_' . $end_key, sanitize_text_field($form_data[$end_key])); }
                 } elseif ($attrs['type'] === 'date_split') {
                     $day_key = $field_key . '_day'; $month_key = $field_key . '_month'; $year_key = $field_key . '_year';
+                    $day_meta_key = 'hs_' . $day_key;
+                    $month_meta_key = 'hs_' . $month_key;
+                    $year_meta_key = 'hs_' . $year_key;
+
                     if (isset($form_data[$day_key]) && isset($form_data[$month_key]) && isset($form_data[$year_key])) {
                         $year = intval($form_data[$year_key]); $month = str_pad(intval($form_data[$month_key]), 2, '0', STR_PAD_LEFT); $day = str_pad(intval($form_data[$day_key]), 2, '0', STR_PAD_LEFT);
                         if ($year && $month && $day) {
                             update_user_meta($user_id, 'hs_' . $field_key, "{$year}/{$month}/{$day}");
-                            update_user_meta($user_id, 'hs_' . $day_key, $day); update_user_meta($user_id, 'hs_' . $month_key, $month); update_user_meta($user_id, 'hs_' . $year_key, $year);
+                            update_user_meta($user_id, $day_meta_key, $day); 
+                            update_user_meta($user_id, $month_meta_key, $month); 
+                            update_user_meta($user_id, $year_meta_key, $year);
                         }
                     }
                 } elseif (isset($form_data[$field_key])) {
@@ -80,7 +87,6 @@ class HS_Ajax {
         }
 
         if (!empty($_FILES)) {
-            // The file handling part remains the same
             add_filter('upload_dir', [$this, 'set_secure_upload_dir']);
             require_once(ABSPATH . 'wp-admin/includes/file.php'); require_once(ABSPATH . 'wp-admin/includes/image.php'); require_once(ABSPATH . 'wp-admin/includes/media.php');
             foreach ($_FILES as $file_key => $file) {
@@ -96,7 +102,8 @@ class HS_Ajax {
             remove_filter('upload_dir', [$this, 'set_secure_upload_dir']);
         }
     
-        if (isset($form_data['final_submission']) && $form_data['final_submission'] === 'true') {
+        // **FIXED**: Check for final_submission directly from $_POST
+        if (isset($_POST['final_submission']) && $_POST['final_submission'] === 'true') {
             update_user_meta($user_id, 'hs_submission_status', 'finalized');
             $user = new WP_User($user_id); $user->set_role('hs_pending');
             delete_user_meta($user_id, 'hs_rejection_reason');
@@ -112,7 +119,8 @@ class HS_Ajax {
     }
     
     public function serve_secure_file() {
-        check_ajax_referer('hs_admin_nonce', 'nonce');
+        // **FIXED**: Using a more specific nonce action and name
+        check_ajax_referer('hs_serve_secure_file_nonce_action', '_wpnonce');
         if (!current_user_can('manage_options')) { wp_die('Access Denied'); }
         $file_id = isset($_GET['file_id']) ? intval($_GET['file_id']) : 0;
         if(!$file_id) { wp_die('Invalid file ID.'); }
@@ -124,6 +132,7 @@ class HS_Ajax {
             @readfile($file_path);
             exit;
         } else {
+            status_header(404);
             wp_die('File not found.');
         }
     }

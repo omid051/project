@@ -17,7 +17,6 @@ class HS_Ajax {
             add_action('wp_ajax_hs_' . $action, [$this, $action]);
         }
         
-        // Hook to hide private attachments from the media library
         add_filter('ajax_query_attachments_args', [$this, 'hide_private_attachments_from_media_library']);
     }
 
@@ -90,13 +89,11 @@ class HS_Ajax {
             }
         }
 
-        // **NEW & FIXED**: Complete file handling rewrite
         if (!empty($_FILES)) {
             require_once(ABSPATH . 'wp-admin/includes/file.php');
             require_once(ABSPATH . 'wp-admin/includes/image.php');
             require_once(ABSPATH . 'wp-admin/includes/media.php');
             
-            // Add the filter to rename files just before the loop
             add_filter('wp_handle_upload_prefilter', [$this, 'rename_secure_file'], 10, 1);
 
             foreach ($_FILES as $file_key => $file) {
@@ -105,24 +102,21 @@ class HS_Ajax {
                     $upload = wp_handle_upload($file, $upload_overrides);
 
                     if ($upload && !isset($upload['error'])) {
-                        // Move the file to our secure directory
-                        $this->move_to_secure_directory($upload);
+                        $moved_file_data = $this->move_to_secure_directory($upload['file']);
                         
-                        // Create attachment
                         $attachment = [
-                            'guid'           => $upload['url'],
+                            'guid'           => $moved_file_data['url'],
                             'post_mime_type' => $upload['type'],
-                            'post_title'     => preg_replace( '/\.[^.]+$/', '', basename( $upload['file'] ) ),
+                            'post_title'     => preg_replace( '/\.[^.]+$/', '', basename( $moved_file_data['file'] ) ),
                             'post_content'   => '',
                             'post_status'    => 'inherit'
                         ];
                         
-                        $attach_id = wp_insert_attachment($attachment, $upload['file']);
+                        $attach_id = wp_insert_attachment($attachment, $moved_file_data['relative_path']);
                         if (!is_wp_error($attach_id)) {
-                            // Mark as private
                             update_post_meta($attach_id, '_hs_private_attachment', true);
                             
-                            $attach_data = wp_generate_attachment_metadata($attach_id, $upload['file']);
+                            $attach_data = wp_generate_attachment_metadata($attach_id, $moved_file_data['file']);
                             wp_update_attachment_metadata($attach_id, $attach_data);
                             update_user_meta($this->current_user_id_for_upload, 'hs_' . $file_key, $attach_id);
                         }
@@ -132,7 +126,6 @@ class HS_Ajax {
                     }
                 }
             }
-            // Remove the filter after the loop
             remove_filter('wp_handle_upload_prefilter', [$this, 'rename_secure_file'], 10);
         }
     
@@ -146,7 +139,6 @@ class HS_Ajax {
         wp_send_json_success(['message' => 'اطلاعات با موفقیت ذخیره شد.']);
     }
     
-    // **NEW**: Renames file to {national_code}-{index}.ext
     public function rename_secure_file($file) {
         $user_id = $this->current_user_id_for_upload;
         if (!$user_id) return $file;
@@ -170,62 +162,86 @@ class HS_Ajax {
         return $file;
     }
 
-    // **NEW**: Moves the uploaded file to the final secure directory
-    private function move_to_secure_directory(&$upload) {
+    private function move_to_secure_directory($temp_file_path) {
         $upload_dir = wp_upload_dir();
-        $secure_dir_path = trailingslashit($upload_dir['basedir']) . HS_SECURE_UPLOADS_DIR_NAME;
+        $secure_dir_name = HS_SECURE_UPLOADS_DIR_NAME;
+        $secure_dir_path = trailingslashit($upload_dir['basedir']) . $secure_dir_name;
         
-        // Ensure the secure directory exists
         if (!is_dir($secure_dir_path)) {
             wp_mkdir_p($secure_dir_path);
-            // Also create .htaccess to deny access
             $htaccess_path = trailingslashit($secure_dir_path) . '.htaccess';
             if (!file_exists($htaccess_path)) {
                 @file_put_contents($htaccess_path, 'Deny from all');
             }
         }
         
-        $new_file = trailingslashit($secure_dir_path) . basename($upload['file']);
+        $filename = basename($temp_file_path);
+        $new_file_path = trailingslashit($secure_dir_path) . $filename;
         
-        if (rename($upload['file'], $new_file)) {
-            $upload['file'] = $new_file;
-            // The URL is not publicly accessible, so we clear it.
-            $upload['url'] = '';
+        if (rename($temp_file_path, $new_file_path)) {
+            return [
+                'file' => $new_file_path, // The new absolute path
+                'url' => '', // URL is empty because it's not publicly accessible
+                'relative_path' => trailingslashit($secure_dir_name) . $filename // The path relative to the uploads dir
+            ];
         }
+        
+        return false;
     }
     
-    // **NEW**: Hides private attachments from the main media library grid
     public function hide_private_attachments_from_media_library($query) {
-        if (!current_user_can('manage_options')) {
-            return $query;
+        // Only apply this logic in the admin area for AJAX requests
+        if (is_admin() && defined('DOING_AJAX') && DOING_AJAX) {
+            $query['meta_query'][] = [
+                'key'     => '_hs_private_attachment',
+                'compare' => 'NOT EXISTS',
+            ];
         }
-        $query['meta_query'][] = [
-            'key'     => '_hs_private_attachment',
-            'compare' => 'NOT EXISTS',
-        ];
         return $query;
     }
 
+    /**
+     * **FINAL FIX**: Manually constructs the file path to prevent errors and
+     * provides a clear error message instead of a white screen.
+     */
     public function serve_secure_file() {
         check_ajax_referer('hs_serve_secure_file_nonce_action');
-        if (!current_user_can('manage_options')) { wp_die('Access Denied'); }
+        if (!current_user_can('manage_options')) {
+            wp_die('عدم دسترسی.', 'خطای دسترسی', ['response' => 403]);
+        }
         
         $file_id = isset($_GET['file_id']) ? intval($_GET['file_id']) : 0;
-        if(!$file_id) { wp_die('Invalid file ID.'); }
+        if (!$file_id) {
+            wp_die('شناسه فایل نامعتبر است.');
+        }
 
-        $file_path = get_attached_file($file_id, true);
+        // Get the path relative to the uploads directory. e.g., "hamtam_secure_uploads/filename.jpg"
+        $relative_path = get_post_meta($file_id, '_wp_attached_file', true);
+        if (empty($relative_path)) {
+            wp_die('اطلاعات متادیتای فایل یافت نشد.');
+        }
 
-        if ($file_path && file_exists($file_path)) {
+        $upload_dir = wp_upload_dir();
+        $absolute_path = trailingslashit($upload_dir['basedir']) . $relative_path;
+
+        if (file_exists($absolute_path)) {
             header('Content-Type: ' . get_post_mime_type($file_id));
-            header('Content-Disposition: inline; filename="' . basename($file_path) . '"');
-            header('Content-Length: ' . filesize($file_path));
-            header("Cache-Control: no-cache, must-revalidate");
-            header("Expires: 0");
-            @readfile($file_path);
+            header('Content-Disposition: inline; filename="' . basename($absolute_path) . '"');
+            header('Content-Length: ' . filesize($absolute_path));
+            header('Cache-Control: no-cache, must-revalidate');
+            header('Expires: 0');
+            
+            // Clean output buffer before reading the file
+            if (ob_get_level()) {
+                ob_end_clean();
+            }
+            
+            @readfile($absolute_path);
             exit;
         } else {
             status_header(404);
-            wp_die('فایل یافت نشد یا دسترسی به آن امکان‌پذیر نیست.');
+            // Provide a useful debug message instead of a white screen
+            wp_die('فایل در سرور یافت نشد. مسیر بررسی شده: ' . esc_html($absolute_path));
         }
     }
 

@@ -21,8 +21,10 @@ if (!defined('HS_PLUGIN_PATH')) {
 if (!defined('HS_PLUGIN_URL')) {
     define('HS_PLUGIN_URL', plugin_dir_url(HS_PLUGIN_FILE));
 }
-if (!defined('HS_SECURE_UPLOADS_DIR_NAME')) {
-    define('HS_SECURE_UPLOADS_DIR_NAME', 'hamtam_secure_uploads');
+
+// **FIXED**: Using a new, more descriptive constant for the private directory.
+if (!defined('HS_PRIVATE_DOCS_DIR_NAME')) {
+    define('HS_PRIVATE_DOCS_DIR_NAME', 'hamtam_private_documents');
 }
 
 require_once HS_PLUGIN_PATH . 'includes/class-hs-main.php';

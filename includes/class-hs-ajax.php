@@ -12,19 +12,16 @@ class HS_Ajax {
     }
 
     private function add_ajax_events() {
-        $actions = ['get_user_status', 'save_profile_form', 'approve_user', 'reject_user', 'send_request', 'handle_request_action', 'cancel_request', 'serve_secure_file'];
+        $actions = ['get_user_status', 'save_profile_form', 'approve_user', 'reject_user', 'send_request', 'handle_request_action', 'cancel_request'];
         foreach ($actions as $action) {
             add_action('wp_ajax_hs_' . $action, [$this, $action]);
         }
-        add_filter('ajax_query_attachments_args', [$this, 'hide_private_attachments_from_media_library']);
     }
 
     public function get_user_status() {
         check_ajax_referer('hs_ajax_nonce', 'nonce');
         $user_id = get_current_user_id();
-        if (!$user_id) {
-            wp_send_json_error();
-        }
+        if (!$user_id) { wp_send_json_error(); }
         
         $user = get_userdata($user_id);
         $user_roles = (array) $user->roles;
@@ -52,13 +49,10 @@ class HS_Ajax {
             parse_str($_POST['form_data'], $form_data);
         }
         
-        // Save text-based fields first
-        $all_field_groups = $this->fields->get_fields();
-        foreach ($all_field_groups as $group) {
+        foreach ($this->fields->get_fields() as $group) {
             foreach ($group['fields'] as $field_key => $attrs) {
-                if ($attrs['type'] == 'file') continue; // Skip file fields
-                // ... (rest of the field saving logic remains the same)
-                 if (in_array($attrs['type'], ['range_select'])) {
+                if ($attrs['type'] == 'file') continue;
+                if (in_array($attrs['type'], ['range_select'])) {
                     $start_key = $field_key . '_start'; $end_key = $field_key . '_end';
                     if (isset($form_data[$start_key])) { update_user_meta($this->current_user_id_for_upload, 'hs_' . $start_key, sanitize_text_field($form_data[$start_key])); }
                     if (isset($form_data[$end_key])) { update_user_meta($this->current_user_id_for_upload, 'hs_' . $end_key, sanitize_text_field($form_data[$end_key])); }
@@ -85,7 +79,6 @@ class HS_Ajax {
             }
         }
 
-        // **NEW & REWRITTEN**: Handle file uploads securely and robustly
         if (!empty($_FILES)) {
             require_once(ABSPATH . 'wp-admin/includes/file.php');
             add_filter('wp_handle_upload_prefilter', [$this, 'rename_secure_file'], 10, 1);
@@ -93,20 +86,16 @@ class HS_Ajax {
             foreach ($_FILES as $file_key => $file) {
                 if (isset($file['name']) && $file['size'] > 0) {
                     $upload = wp_handle_upload($file, ['test_form' => false]);
-
                     if ($upload && !isset($upload['error'])) {
                         $moved_file_data = $this->move_to_private_dir($upload['file']);
                         if ($moved_file_data) {
                             $file_info = [
                                 'file_name'     => $moved_file_data['filename'],
                                 'mime_type'     => $upload['type'],
-                                'original_name' => $file['name'] // The original name before renaming
+                                'original_name' => $file['name']
                             ];
                             update_user_meta($this->current_user_id_for_upload, 'hs_' . $file_key, $file_info);
                         }
-                    } else {
-                        wp_send_json_error(['message' => 'خطا در آپلود فایل: ' . ($upload['error'] ?? 'ناشناخته')]);
-                        return;
                     }
                 }
             }
@@ -165,51 +154,7 @@ class HS_Ajax {
         
         return false;
     }
-    
-    public function hide_private_attachments_from_media_library($query) { return $query; } // No longer needed, kept empty for safety
 
-    public function serve_secure_file() {
-        check_ajax_referer('hs_serve_secure_file_nonce_action');
-        if (!current_user_can('manage_options')) {
-            wp_die('عدم دسترسی.', 'خطای دسترسی', ['response' => 403]);
-        }
-        
-        $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-        $doc_key = isset($_GET['doc_key']) ? sanitize_text_field($_GET['doc_key']) : '';
-
-        if (!$user_id || !$doc_key) {
-            wp_die('اطلاعات درخواست نامعتبر است.');
-        }
-
-        $file_info = get_user_meta($user_id, $doc_key, true);
-        if (empty($file_info) || !is_array($file_info) || empty($file_info['file_name'])) {
-            wp_die('فایل برای این کاربر یافت نشد.');
-        }
-
-        $private_dir_name = HS_PRIVATE_DOCS_DIR_NAME;
-        $wp_upload_dir = wp_get_upload_dir();
-        $private_dir_path = trailingslashit($wp_upload_dir['basedir']) . $private_dir_name;
-        $absolute_path = trailingslashit($private_dir_path) . $file_info['file_name'];
-
-        if (file_exists($absolute_path)) {
-            header('Content-Type: ' . esc_attr($file_info['mime_type']));
-            header('Content-Disposition: inline; filename="' . esc_attr($file_info['original_name']) . '"');
-            header('Content-Length: ' . filesize($absolute_path));
-            header('Cache-Control: no-cache, must-revalidate');
-            header('Pragma: no-cache');
-            header('Expires: 0');
-            
-            if (ob_get_level()) ob_end_clean();
-            
-            @readfile($absolute_path);
-            exit;
-        } else {
-            status_header(404);
-            wp_die('فایل در سرور یافت نشد. این خطا ممکن است به دلیل مشکلات سطح دسترسی پوشه‌ها نیز باشد.');
-        }
-    }
-
-    // --- Other methods remain unchanged ---
     public function approve_user() { check_ajax_referer('hs_admin_nonce', 'nonce'); if (!current_user_can('manage_options')) { wp_send_json_error(['message' => 'شما دسترسی لازم برای این کار را ندارید.']); } $user_id = isset($_POST['user_id']) ? intval($_POST['user_id']) : 0; if (!$user_id) { wp_send_json_error(['message' => 'شناسه کاربر نامعتبر است.']); } update_user_meta($user_id, 'hs_submission_status', 'approved'); delete_user_meta($user_id, 'hs_rejection_reason'); $user = new WP_User($user_id); $user->set_role('hs_approved'); clean_user_cache($user_id); wp_send_json_success(['message' => 'کاربر با موفقیت تأیید شد.', 'new_role_name' => 'تأیید شده']); }
     public function reject_user() { check_ajax_referer('hs_admin_nonce', 'nonce'); if (!current_user_can('manage_options')) { wp_send_json_error(['message' => 'شما دسترسی لازم برای این کار را ندارید.']); } $user_id = isset($_POST['user_id']) ? intval($_POST['user_id']) : 0; $reason = isset($_POST['reason']) ? sanitize_textarea_field($_POST['reason']) : ''; if (!$user_id || empty($reason)) { wp_send_json_error(['message' => 'شناسه کاربر یا دلیل رد نامعتبر است.']); } update_user_meta($user_id, 'hs_submission_status', 'rejected'); update_user_meta($user_id, 'hs_rejection_reason', $reason); $user = new WP_User($user_id); $user->set_role('hs_rejected'); clean_user_cache($user_id); wp_send_json_success(['message' => 'کاربر رد شد و پیام برای او ارسال گردید.', 'new_role_name' => 'رد شده']); }
     public function send_request() { check_ajax_referer('hs_ajax_nonce', 'nonce'); $sender_id = get_current_user_id(); $receiver_id = isset($_POST['receiver_id']) ? intval($_POST['receiver_id']) : 0; if (!$receiver_id || $sender_id == $receiver_id) { wp_send_json_error(['message' => 'اطلاعات نامعتبر است.']); } if (!$this->helpers->check_user_access_permission(true)) { wp_send_json_error(['message' => 'شما اجازه ارسال درخواست را ندارید.']); } if ($this->helpers->get_interaction_between_users($sender_id, $receiver_id)) { wp_send_json_error(['message' => 'شما قبلاً برای این کاربر درخواست ارسال کرده‌اید.']); } global $wpdb; $result = $wpdb->insert($wpdb->prefix . 'hs_requests', ['sender_id' => $sender_id, 'receiver_id' => $receiver_id, 'status' => 'pending', 'request_date' => current_time('mysql')], ['%d', '%d', '%s', '%s']); if ($result) { wp_send_json_success(['message' => 'درخواست شما با موفقیت ارسال شد.']); } else { wp_send_json_error(['message' => 'خطایی در ارسال درخواست رخ داد.']); } }

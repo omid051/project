@@ -1,0 +1,10 @@
+.hs-admin-wrap .nav-tab-wrapper { margin-bottom: 20px; }
+.hs-status-badge { display: inline-block; padding: 3px 8px; border-radius: 10px; color: #fff; font-size: 0.9em; white-space: nowrap; }
+.hs-status-badge.status-pending, .hs-status-badge.status-new { background-color: #ffb900; }
+.hs-status-badge.status-accepted, .hs-status-badge.status-admin_confirm { background-color: #46b450; }
+.hs-status-badge.status-rejected, .hs-status-badge.status-admin_reject { background-color: #dc3232; }
+.hs-status-badge.status-cancelled, .hs-status-badge.status-cancelled_by_admin, .hs-status-badge.status-auto_cancelled { background-color: #72777c; }
+.cancellation-reason-row td { background-color: #fef7f1 !important; border-left: 4px solid #f0ad4e !important; }
+#hs-admin-review-box #hs-profile-docs { padding-bottom: 10px; }
+#hs-admin-review-box #hs-profile-docs p { margin: 5px 0; }
+#hs-admin-review-box .hs-admin-actions { padding-top: 10px; }

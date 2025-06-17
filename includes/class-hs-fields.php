@@ -19,15 +19,18 @@ class HS_Fields {
             'family' => [ 'title' => '۲. خانواده', 'fields' => [
                  'father_birth_date' => ['label' => 'تاریخ تولد پدر', 'type' => 'date_split', 'required' => true, 'public' => false, 'age_range' => [20, 120]],
                  'father_is_alive' => ['label' => 'پدر در قید حیات', 'type' => 'select', 'required' => true, 'public' => false, 'options' => ['yes' => 'بله', 'no' => 'خیر']],
+                 'father_birth_province' => ['label' => 'استان محل تولد پدر', 'type' => 'province', 'required' => true, 'public' => false],
+                 'father_birth_city' => ['label' => 'شهر محل تولد پدر', 'type' => 'city', 'required' => true, 'public' => false],
                  'mother_birth_date' => ['label' => 'تاریخ تولد مادر', 'type' => 'date_split', 'required' => true, 'public' => false, 'age_range' => [20, 120]],
                  'mother_is_alive' => ['label' => 'مادر در قید حیات', 'type' => 'select', 'required' => true, 'public' => false, 'options' => ['yes' => 'بله', 'no' => 'خیر']],
+                 'mother_birth_province' => ['label' => 'استان محل تولد مادر', 'type' => 'province', 'required' => true, 'public' => false],
+                 'mother_birth_city' => ['label' => 'شهر محل تولد مادر', 'type' => 'city', 'required' => true, 'public' => false],
                  'siblings_count' => ['label' => 'تعداد خواهران و برادران', 'type' => 'number', 'required' => true, 'public' => true, 'inputmode' => 'numeric'],
                  'family_description' => ['label' => 'توضیحات بیشتر', 'type' => 'textarea', 'required' => false, 'public' => true],
             ]],
             'additional' => [ 'title' => '۳. اطلاعات جانبی', 'fields' => [
                 'religious_commitment' => ['label' => 'تقید مذهبی', 'type' => 'select', 'required' => true, 'public' => true, 'options' => ['always_on_time' => 'همیشه نماز اول وقت می‌خوانند.', 'always' => 'همیشه نماز می‌خوانند اما نه اول وقت.', 'sometimes' => 'گاهی اوقات نماز می‌خوانند.', 'never' => 'نماز نمی‌خوانند.']],
                 'smoker_status' => ['label' => 'مصرف کننده دخانیات', 'type' => 'select', 'required' => true, 'public' => true, 'options' => ['yes' => 'هستم', 'no' => 'نیستم']],
-                // **FIXED**: Added options for military_service
                 'military_service' => ['label' => 'وضعیت نظام وظیفه', 'type' => 'select', 'required' => true, 'public' => true, 'condition' => ['field' => 'gender', 'value' => 'male'], 'options' => ['conscript' => 'مشمول هستم', 'end_of_service' => 'دارای کارت پایان خدمت', 'kefalat_exemption' => 'معافیت کفالت', 'medical_exemption' => 'معافیت پزشکی', 'other_exemption' => 'معافیت سایر']],
                 'marital_status' => ['label' => 'وضعیت تاهل', 'type' => 'select', 'required' => true, 'public' => true, 'options' => ['single' => 'بدون سابقه ازدواج', 'divorced' => 'متارکه کرده ام', 'widowed' => 'همسر فوت شده است.', 'martyr_spouse' => 'همسر شهید شده است.', 'engaged_divorced_not_white' => 'در دوران عقد جدا شده ام و شناسنامه سفید نیست', 'engaged_divorced_white' => 'در دوران عقد جدا شده ام و شناسنامه سفید است']],
                 'has_children' => ['label' => 'دارای فرزند', 'type' => 'select', 'required' => true, 'public' => true, 'condition' => ['field' => 'marital_status', 'compare' => '!=', 'value' => 'single'], 'options' => ['yes' => 'می باشم', 'no' => 'نمی باشم']],

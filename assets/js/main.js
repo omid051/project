@@ -66,10 +66,11 @@
         const form = $('#hs-profile-form');
         const prevBtn = $('#hs-prev-btn'), nextBtn = $('#hs-next-btn'), submitBtn = $('#hs-submit-btn'), loader = form.find('.hs-loader');
 
+        // **FIXED**: Correctly handle form state and button visibility
         const updateFormState = (isLocked) => {
             form.data('locked', isLocked);
             form.find('input, select, textarea').prop('disabled', isLocked);
-            $('.hs-navigation-buttons').toggle(!isLocked);
+            updateButtonVisibility();
         };
         
         const refreshUserStatus = () => {
@@ -96,7 +97,6 @@
              });
         };
         
-        const nl2br = (str) => (str + '').replace(/([^>\r\n]?)(\r\n|\n\r|\r|\n)/g, '$1<br>$2');
         const populateCities = (provinceSelect, savedCity = '') => {
             const province = provinceSelect.val(), citySelect = $('#' + provinceSelect.data('city-target')), currentCityVal = savedCity || citySelect.data('saved-value');
             citySelect.empty().append('<option value="">ابتدا استان را انتخاب کنید</option>');
@@ -115,36 +115,42 @@
         
         const checkConditions = () => {
             $('[data-condition-field]').each(function() {
-                const conditionalEl = $(this);
-                const fieldName = conditionalEl.data('condition-field');
-                const requiredValue = String(conditionalEl.data('condition-value')).split(',');
-                const compare = conditionalEl.data('condition-compare') || '==';
-                const controller = $('#' + fieldName);
-                const controllerValue = controller.is(':radio,:checkbox') ? $('input[name="' + controller.attr('name') + '"]:checked').val() : controller.val();
-                
+                const conditionalEl = $(this), fieldName = conditionalEl.data('condition-field'), requiredValue = String(conditionalEl.data('condition-value')).split(','), compare = conditionalEl.data('condition-compare') || '==', controller = $('#' + fieldName), controllerValue = controller.is(':radio,:checkbox') ? controller.filter(':checked').val() : controller.val();
                 let show = (compare === '!=') ? (controllerValue && !requiredValue.includes(controllerValue)) : requiredValue.includes(controllerValue);
-                
-                if (show) {
-                    if (!conditionalEl.is(':visible')) {
-                        conditionalEl.slideDown(200);
-                    }
-                } else {
-                    if (conditionalEl.is(':visible')) {
-                        conditionalEl.slideUp(200);
-                    }
-                }
-                conditionalEl.find('input, select, textarea').prop('required', show && (conditionalEl.find('[required]').length > 0));
+                const isCurrentlyVisible = conditionalEl.is(':visible');
+                if(show && !isCurrentlyVisible) conditionalEl.slideDown(200);
+                if(!show && isCurrentlyVisible) conditionalEl.slideUp(200);
+                conditionalEl.find('input, select, textarea').prop('required', show);
             });
         };
 
         const showStep = (step) => { $('.hs-form-step').hide(); $('#hs-step-' + step).show(); updateButtonVisibility(); };
-        const updateButtonVisibility = () => { let isLocked = form.data('locked'); prevBtn.toggle(currentStep > 1 && !isLocked); nextBtn.toggle(currentStep < totalSteps && !isLocked); submitBtn.toggle(currentStep === totalSteps && !isLocked); };
         
-        nextBtn.on('click', () => { if (form.data('locked')) return; if (validateStep(currentStep)) saveStepData(false); });
+        // **FIXED**: Correctly handle button visibility based on form lock state
+        const updateButtonVisibility = () => {
+            let isLocked = form.data('locked');
+            prevBtn.toggle(currentStep > 1);
+            nextBtn.toggle(currentStep < totalSteps);
+            submitBtn.toggle(currentStep === totalSteps && !isLocked); // Only show submit if not locked
+            if(isLocked){
+                $('.hs-navigation-buttons').show(); // Ensure wrapper is visible
+            }
+        };
+        
+        // **FIXED**: Allow navigation even when form is locked
+        nextBtn.on('click', () => { 
+            if (form.data('locked')) {
+                if (currentStep < totalSteps) {
+                    currentStep++;
+                    showStep(currentStep);
+                }
+                return;
+            }
+            if (validateStep(currentStep)) saveStepData(false); 
+        });
         prevBtn.on('click', () => { if (currentStep > 1) { currentStep--; showStep(currentStep); } });
         form.on('submit', (e) => { e.preventDefault(); if (form.data('locked')) return; if (validateAllSteps()) saveStepData(true); });
         
-        // **FIXED**: Handle Enter key press
         form.on('keydown', 'input', function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -167,24 +173,20 @@
         });
 
         function saveStepData(isFinal) {
-            loader.show(); prevBtn.add(nextBtn).add(submitBtn).prop('disabled', true).hide();
+            loader.show(); prevBtn.add(nextBtn).add(submitBtn).prop('disabled', true);
             
-            const fileInputs = form.find('input[type="file"]');
-            const formData = new FormData();
-            
-            // Append form data
-            formData.append('form_data', form.serialize());
+            const formData = new FormData(form[0]);
             formData.append('action', 'hs_save_profile_form'); 
             formData.append('nonce', hs_ajax_data.nonce);
 
-            // Append files
-            fileInputs.each(function() {
-                if (this.files.length > 0) {
-                    formData.append(this.name, this.files[0]);
-                }
-            });
-
-            if (isFinal) formData.append('final_submission', 'true');
+            // Since we're using FormData, we pass the serialized form data within it
+            // This is needed because FormData doesn't pick up disabled fields
+            const allData = form.find(':input').not(':disabled').serialize();
+            formData.append('form_data', allData);
+            
+            if (isFinal) {
+                formData.append('final_submission', 'true');
+            }
 
             $.ajax({ url: hs_ajax_data.ajax_url, type: 'POST', data: formData, processData: false, contentType: false,
                 success: (res) => {
@@ -194,26 +196,18 @@
                             updateFormState(true);
                         } else { currentStep++; showStep(currentStep); }
                     } else {
-                        // **FIXED**: Handle specific error for duplicate national code
-                        if (res.data && res.data.error_id === 'duplicate_national_code') {
-                            const ncField = $('#national_code');
-                            ncField.closest('.hs-form-group').find('.hs-field-error').text(res.data.message);
-                            ncField.addClass('has-error');
-                            showStep(ncField.closest('.hs-form-step').index() + 1); // Go to the step with the error
-                        } else {
-                            showNotification(res.data?.message || hs_ajax_data.messages.error_saving, 'error');
-                        }
+                         showNotification(res.data?.message || hs_ajax_data.messages.error_saving, 'error');
                     }
                 },
                 error: () => { showNotification(hs_ajax_data.messages.error_saving, 'error'); },
-                complete: () => { loader.hide(); if (!form.data('locked')) { prevBtn.add(nextBtn).add(submitBtn).prop('disabled', false); updateButtonVisibility(); } }
+                complete: () => { loader.hide(); prevBtn.add(nextBtn).add(submitBtn).prop('disabled', false); updateButtonVisibility(); }
             });
         }
         
         const validationPatterns = {
             'mobile_phone': { regex: /^09[0-9]{9}$/, message: 'فرمت شماره موبایل صحیح نیست (مثال: 09123456789).'},
             'national_code': { regex: /^[0-9]{10}$/, message: 'کد ملی باید ۱۰ رقم باشد.'},
-            'landline_phone': { regex: /^[0-9]{11}$/, message: 'فرمت تلفن ثابت صحیح نیست (مثال: 02112345678).'},
+            'landline_phone': { regex: /^0[0-9]{10}$/, message: 'فرمت تلفن ثابت صحیح نیست (مثال: 02112345678).'},
             'postal_code': { regex: /^[0-9]{10}$/, message: 'کد پستی باید ۱۰ رقم باشد.'},
             'first_name': { regex: /^[\u0600-\u06FF\s]+$/, message: 'لطفاً فقط از حروف فارسی استفاده کنید.'},
             'last_name': { regex: /^[\u0600-\u06FF\s]+$/, message: 'لطفاً فقط از حروف فارسی استفاده کنید.'},

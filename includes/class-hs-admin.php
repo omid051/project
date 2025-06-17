@@ -154,8 +154,9 @@ class HS_Admin {
                         $file_id = get_user_meta($user->ID, 'hs_' . $key, true);
                         if($file_id) {
                             $has_docs = true;
-                            // **FIXED**: Nonce handle is now 'hs_admin_nonce' to match the AJAX handler check
-                            $file_url = admin_url('admin-ajax.php?action=hs_serve_secure_file&file_id=' . $file_id . '&nonce=' . wp_create_nonce('hs_admin_nonce'));
+                            // **FIXED**: Using a more specific nonce name and action to avoid conflicts
+                            $nonce = wp_create_nonce('hs_serve_secure_file_nonce_action');
+                            $file_url = admin_url('admin-ajax.php?action=hs_serve_secure_file&file_id=' . $file_id . '&_wpnonce=' . $nonce);
                             echo '<p><strong>' . esc_html($attrs['label']) . ':</strong> <a href="' . esc_url($file_url) . '" target="_blank">مشاهده فایل</a></p>';
                         }
                     }

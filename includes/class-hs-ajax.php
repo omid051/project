@@ -59,23 +59,24 @@ class HS_Ajax {
         $all_field_groups = $this->fields->get_fields();
         foreach ($all_field_groups as $group) {
             foreach ($group['fields'] as $field_key => $attrs) {
+                // **FIXED**: Correctly save all field types, especially date components
                 if (in_array($attrs['type'], ['range_select'])) {
                     $start_key = $field_key . '_start'; $end_key = $field_key . '_end';
                     if (isset($form_data[$start_key])) { update_user_meta($user_id, 'hs_' . $start_key, sanitize_text_field($form_data[$start_key])); }
                     if (isset($form_data[$end_key])) { update_user_meta($user_id, 'hs_' . $end_key, sanitize_text_field($form_data[$end_key])); }
                 } elseif ($attrs['type'] === 'date_split') {
                     $day_key = $field_key . '_day'; $month_key = $field_key . '_month'; $year_key = $field_key . '_year';
-                    $day_meta_key = 'hs_' . $day_key;
-                    $month_meta_key = 'hs_' . $month_key;
-                    $year_meta_key = 'hs_' . $year_key;
-
                     if (isset($form_data[$day_key]) && isset($form_data[$month_key]) && isset($form_data[$year_key])) {
-                        $year = intval($form_data[$year_key]); $month = str_pad(intval($form_data[$month_key]), 2, '0', STR_PAD_LEFT); $day = str_pad(intval($form_data[$day_key]), 2, '0', STR_PAD_LEFT);
+                        $day = sanitize_text_field($form_data[$day_key]);
+                        $month = sanitize_text_field($form_data[$month_key]);
+                        $year = sanitize_text_field($form_data[$year_key]);
                         if ($year && $month && $day) {
-                            update_user_meta($user_id, 'hs_' . $field_key, "{$year}/{$month}/{$day}");
-                            update_user_meta($user_id, $day_meta_key, $day); 
-                            update_user_meta($user_id, $month_meta_key, $month); 
-                            update_user_meta($user_id, $year_meta_key, $year);
+                            $formatted_month = str_pad($month, 2, '0', STR_PAD_LEFT);
+                            $formatted_day = str_pad($day, 2, '0', STR_PAD_LEFT);
+                            update_user_meta($user_id, 'hs_' . $field_key, "{$year}/{$formatted_month}/{$formatted_day}");
+                            update_user_meta($user_id, 'hs_' . $day_key, $day); 
+                            update_user_meta($user_id, 'hs_' . $month_key, $month); 
+                            update_user_meta($user_id, 'hs_' . $year_key, $year);
                         }
                     }
                 } elseif (isset($form_data[$field_key])) {
@@ -102,10 +103,10 @@ class HS_Ajax {
             remove_filter('upload_dir', [$this, 'set_secure_upload_dir']);
         }
     
-        // **FIXED**: Check for final_submission directly from $_POST
         if (isset($_POST['final_submission']) && $_POST['final_submission'] === 'true') {
             update_user_meta($user_id, 'hs_submission_status', 'finalized');
-            $user = new WP_User($user_id); $user->set_role('hs_pending');
+            $user = new WP_User($user_id);
+            $user->set_role('hs_pending');
             delete_user_meta($user_id, 'hs_rejection_reason');
             clean_user_cache($user_id);
         }
@@ -119,12 +120,29 @@ class HS_Ajax {
     }
     
     public function serve_secure_file() {
-        // **FIXED**: Using a more specific nonce action and name
-        check_ajax_referer('hs_serve_secure_file_nonce_action', '_wpnonce');
+        // **FIXED**: Robust file serving logic
+        check_ajax_referer('hs_serve_secure_file_nonce_action');
         if (!current_user_can('manage_options')) { wp_die('Access Denied'); }
+        
         $file_id = isset($_GET['file_id']) ? intval($_GET['file_id']) : 0;
         if(!$file_id) { wp_die('Invalid file ID.'); }
-        $file_path = get_attached_file($file_id);
+
+        $relative_path = get_post_meta($file_id, '_wp_attached_file', true);
+        if (!$relative_path) {
+            wp_die('File metadata not found.');
+        }
+
+        $upload_dir = wp_upload_dir();
+        $secure_dir_path = trailingslashit($upload_dir['basedir']) . HS_SECURE_UPLOADS_DIR_NAME;
+        
+        // The relative path might contain year/month folders. We need to append it correctly.
+        $file_path = $secure_dir_path . '/' . $relative_path;
+        
+        // Some servers might store the full path, some relative. We check both.
+        if (!file_exists($file_path)) {
+             $file_path = get_attached_file($file_id); // Fallback to original method
+        }
+
         if ($file_path && file_exists($file_path)) {
             header('Content-Type: ' . get_post_mime_type($file_id));
             header('Content-Disposition: inline; filename="' . basename($file_path) . '"');
@@ -133,7 +151,7 @@ class HS_Ajax {
             exit;
         } else {
             status_header(404);
-            wp_die('File not found.');
+            wp_die('File not found on server.');
         }
     }
 

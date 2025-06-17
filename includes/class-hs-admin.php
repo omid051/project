@@ -16,8 +16,8 @@ class HS_Admin {
     public function enqueue_scripts($hook) {
         if (strpos($hook, 'hamtam-') === false && $hook !== 'user-edit.php' && $hook !== 'profile.php') { return; }
         
-        wp_enqueue_style('hs-admin-styles', HS_PLUGIN_URL . 'assets/css/admin.css', [], '6.1.0');
-        wp_enqueue_script('hs-admin-js', HS_PLUGIN_URL . 'assets/js/admin.js', ['jquery'], '6.1.0', true);
+        wp_enqueue_style('hs-admin-styles', HS_PLUGIN_URL . 'assets/css/admin.css', [], '7.0.0');
+        wp_enqueue_script('hs-admin-js', HS_PLUGIN_URL . 'assets/js/admin.js', ['jquery'], '7.0.0', true);
         wp_localize_script('hs-admin-js', 'hs_admin_data', ['nonce' => wp_create_nonce('hs_admin_nonce')]);
     }
 
@@ -151,13 +151,13 @@ class HS_Admin {
                     $doc_fields = array_filter($this->fields->get_fields()['documents']['fields'], fn($a) => $a['type'] === 'file');
                     $has_docs = false;
                     foreach ($doc_fields as $key => $attrs) {
-                        $file_id = get_user_meta($user->ID, 'hs_' . $key, true);
-                        if($file_id) {
+                        // **FIXED**: Link generation now points to the new handler with user_id and doc_key
+                        $file_data = get_user_meta($user->ID, 'hs_' . $key, true);
+                        if(!empty($file_data) && is_array($file_data)) {
                             $has_docs = true;
-                            // **FIXED**: Using a more robust nonce for the secure file link
                             $nonce = wp_create_nonce('hs_serve_secure_file_nonce_action');
-                            $file_url = admin_url('admin-ajax.php?action=hs_serve_secure_file&file_id=' . $file_id . '&_wpnonce=' . $nonce);
-                            echo '<p><strong>' . esc_html($attrs['label']) . ':</strong> <a href="' . esc_url($file_url) . '" target="_blank">مشاهده فایل</a></p>';
+                            $file_url = admin_url('admin-ajax.php?action=hs_serve_secure_file&user_id=' . $user->ID . '&doc_key=hs_' . $key . '&_wpnonce=' . $nonce);
+                            echo '<p><strong>' . esc_html($attrs['label']) . ':</strong> <a href="' . esc_url($file_url) . '" target="_blank">مشاهده فایل (' . esc_html($file_data['original_name']) . ')</a></p>';
                         }
                     }
                     if(!$has_docs) echo '<p>هیچ مدرکی توسط این کاربر بارگذاری نشده است.</p>';

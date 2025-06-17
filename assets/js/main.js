@@ -69,7 +69,7 @@
         const updateFormState = (isLocked) => {
             form.data('locked', isLocked);
             form.find('input, select, textarea').prop('disabled', isLocked);
-            updateButtonVisibility(); // **FIXED**: Call visibility function directly
+            $('.hs-navigation-buttons').toggle(!isLocked);
         };
         
         const refreshUserStatus = () => {
@@ -115,27 +115,47 @@
         
         const checkConditions = () => {
             $('[data-condition-field]').each(function() {
-                const conditionalEl = $(this), fieldName = conditionalEl.data('condition-field'), requiredValue = String(conditionalEl.data('condition-value')).split(','), compare = conditionalEl.data('condition-compare') || '==', controller = $('#' + fieldName), controllerValue = controller.is(':radio,:checkbox') ? controller.filter(':checked').val() : controller.val();
+                const conditionalEl = $(this);
+                const fieldName = conditionalEl.data('condition-field');
+                const requiredValue = String(conditionalEl.data('condition-value')).split(',');
+                const compare = conditionalEl.data('condition-compare') || '==';
+                const controller = $('#' + fieldName);
+                const controllerValue = controller.is(':radio,:checkbox') ? $('input[name="' + controller.attr('name') + '"]:checked').val() : controller.val();
+                
                 let show = (compare === '!=') ? (controllerValue && !requiredValue.includes(controllerValue)) : requiredValue.includes(controllerValue);
-                const isCurrentlyVisible = conditionalEl.is(':visible');
-                if(show && !isCurrentlyVisible) conditionalEl.slideDown(200);
-                if(!show && isCurrentlyVisible) conditionalEl.slideUp(200);
-                conditionalEl.find('input, select, textarea').prop('required', show);
+                
+                if (show) {
+                    if (!conditionalEl.is(':visible')) {
+                        conditionalEl.slideDown(200);
+                    }
+                } else {
+                    if (conditionalEl.is(':visible')) {
+                        conditionalEl.slideUp(200);
+                    }
+                }
+                conditionalEl.find('input, select, textarea').prop('required', show && (conditionalEl.find('[required]').length > 0));
             });
         };
 
         const showStep = (step) => { $('.hs-form-step').hide(); $('#hs-step-' + step).show(); updateButtonVisibility(); };
-        const updateButtonVisibility = () => {
-            let isLocked = form.data('locked');
-            prevBtn.toggle(currentStep > 1); // **FIXED**: Show if not on the first step
-            nextBtn.toggle(currentStep < totalSteps); // **FIXED**: Show if not on the last step
-            submitBtn.toggle(currentStep === totalSteps && !isLocked); // **FIXED**: Show submit only on last step and if not locked
-        };
+        const updateButtonVisibility = () => { let isLocked = form.data('locked'); prevBtn.toggle(currentStep > 1 && !isLocked); nextBtn.toggle(currentStep < totalSteps && !isLocked); submitBtn.toggle(currentStep === totalSteps && !isLocked); };
         
-        nextBtn.on('click', () => { if (form.data('locked')) { currentStep++; showStep(currentStep); return; } if (validateStep(currentStep)) saveStepData(false); });
+        nextBtn.on('click', () => { if (form.data('locked')) return; if (validateStep(currentStep)) saveStepData(false); });
         prevBtn.on('click', () => { if (currentStep > 1) { currentStep--; showStep(currentStep); } });
         form.on('submit', (e) => { e.preventDefault(); if (form.data('locked')) return; if (validateAllSteps()) saveStepData(true); });
         
+        // **FIXED**: Handle Enter key press
+        form.on('keydown', 'input', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (nextBtn.is(':visible')) {
+                    nextBtn.trigger('click');
+                } else if (submitBtn.is(':visible')) {
+                    form.trigger('submit');
+                }
+            }
+        });
+
         $(document).on('input', 'input[type="tel"], input[type="number"]', function() {
             const caretPos = this.selectionStart;
             const originalLength = this.value.length;
@@ -148,9 +168,24 @@
 
         function saveStepData(isFinal) {
             loader.show(); prevBtn.add(nextBtn).add(submitBtn).prop('disabled', true).hide();
-            const formData = new FormData(form[0]);
-            formData.append('action', 'hs_save_profile_form'); formData.append('nonce', hs_ajax_data.nonce);
+            
+            const fileInputs = form.find('input[type="file"]');
+            const formData = new FormData();
+            
+            // Append form data
+            formData.append('form_data', form.serialize());
+            formData.append('action', 'hs_save_profile_form'); 
+            formData.append('nonce', hs_ajax_data.nonce);
+
+            // Append files
+            fileInputs.each(function() {
+                if (this.files.length > 0) {
+                    formData.append(this.name, this.files[0]);
+                }
+            });
+
             if (isFinal) formData.append('final_submission', 'true');
+
             $.ajax({ url: hs_ajax_data.ajax_url, type: 'POST', data: formData, processData: false, contentType: false,
                 success: (res) => {
                     if (res.success) {
@@ -158,10 +193,20 @@
                             $('#hs-form-messages').html('اطلاعات شما با موفقیت ثبت شد و برای بررسی ارسال گردید. تا زمان بررسی، پروفایل شما قفل خواهد بود.').removeClass('error').addClass('notice success').slideDown();
                             updateFormState(true);
                         } else { currentStep++; showStep(currentStep); }
-                    } else { showNotification(res.data?.message || hs_ajax_data.messages.error_saving, 'error'); }
+                    } else {
+                        // **FIXED**: Handle specific error for duplicate national code
+                        if (res.data && res.data.error_id === 'duplicate_national_code') {
+                            const ncField = $('#national_code');
+                            ncField.closest('.hs-form-group').find('.hs-field-error').text(res.data.message);
+                            ncField.addClass('has-error');
+                            showStep(ncField.closest('.hs-form-step').index() + 1); // Go to the step with the error
+                        } else {
+                            showNotification(res.data?.message || hs_ajax_data.messages.error_saving, 'error');
+                        }
+                    }
                 },
                 error: () => { showNotification(hs_ajax_data.messages.error_saving, 'error'); },
-                complete: () => { loader.hide(); if (!form.data('locked')) { prevBtn.add(nextBtn).add(submitBtn).prop('disabled', false); updateButtonVisibility(); } else { updateButtonVisibility(); } }
+                complete: () => { loader.hide(); if (!form.data('locked')) { prevBtn.add(nextBtn).add(submitBtn).prop('disabled', false); updateButtonVisibility(); } }
             });
         }
         
@@ -243,7 +288,7 @@
         });
     });
     
-    $(document).on('click', '.hs-profile-actions button[data-action], .hs-requests-list button[data-action], table button[data-action]', function(e) {
+    $(document).on('click', '.hs-profile-actions button[data-action], .hs-requests-list button[data-action]', function(e) {
         e.preventDefault();
         const button = $(this);
         const action = button.data('action');
@@ -251,13 +296,13 @@
         const originalText = button.text();
         button.data('original-text', originalText);
         showConfirm(action === 'accept' ? 'آیا این درخواست را تایید می‌کنید؟' : 'آیا این درخواست را رد می‌کنید؟', () => {
-            button.closest('tr, li, .hs-profile-actions').find('button').prop('disabled', true);
+            button.closest('li, .hs-profile-actions').find('button').prop('disabled', true);
             button.text('صبر کنید...');
             $.post(hs_ajax_data.ajax_url, { action: 'hs_handle_request_action', nonce: hs_ajax_data.nonce, request_id: requestId, request_action: action })
             .done((res) => {
                 if (res.success) { showNotification(res.data.message, 'success'); setTimeout(() => window.location.reload(), 2000);
-                } else { showNotification('خطا: ' + (res.data.message || 'مشکلی رخ داد.'), 'error'); button.closest('tr, li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); }
-            }).fail(() => { showNotification('خطای سرور.', 'error'); button.closest('tr, li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); });
+                } else { showNotification('خطا: ' + (res.data.message || 'مشکلی رخ داد.'), 'error'); button.closest('li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); }
+            }).fail(() => { showNotification('خطای سرور.', 'error'); button.closest('li, .hs-profile-actions').find('button').prop('disabled', false).text(originalText); });
         });
     });
 
@@ -286,20 +331,5 @@
             } else { showNotification('خطا: ' + (res.data.message || 'ناشناخته'), 'error'); button.prop('disabled', false).text('تایید و لغو'); }
         }).fail(() => { showNotification('خطای سرور.', 'error'); button.prop('disabled', false).text('تایید و لغو'); });
     });
-
-    // **FIXED**: Added event handlers for cancellation modal close button and overlay click
-    $(document).on('click', '#hs-cancellation-modal .hs-close-button, #hs-cancellation-modal', function(e) {
-        if (e.target === this || $(e.target).hasClass('hs-close-button')) {
-            $('#hs-cancellation-modal').removeClass('active').fadeOut(200, function() {
-                $(this).remove();
-            });
-        }
-    });
-    
-    // Prevent modal from closing when clicking on the content itself
-    $(document).on('click', '.hs-modal-content', function(e){
-        e.stopPropagation();
-    });
-
 
 })(jQuery);

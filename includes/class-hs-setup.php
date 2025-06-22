@@ -9,7 +9,7 @@ class HS_Setup {
     public static function activate() {
         self::create_roles();
         self::create_requests_table();
-        self::create_secure_uploads_dir();
+        // The secure uploads dir is now created on-demand by the AJAX class.
         if (!wp_next_scheduled('hs_auto_cancel_old_requests_hook')) {
             wp_schedule_event(time(), 'hourly', 'hs_auto_cancel_old_requests_hook');
         }
@@ -27,7 +27,7 @@ class HS_Setup {
             self::create_requests_table();
             update_option('hs_db_version', '1.0');
         }
-        self::create_secure_uploads_dir();
+        // The secure uploads dir is now created on-demand, so no check is needed here.
     }
 
     private static function create_roles() {
@@ -58,11 +58,5 @@ class HS_Setup {
         dbDelta($sql);
     }
     
-    public static function create_secure_uploads_dir() {
-        $upload_dir = wp_upload_dir();
-        $secure_dir = trailingslashit($upload_dir['basedir']) . HS_SECURE_UPLOADS_DIR_NAME;
-        if (!is_dir($secure_dir)) { wp_mkdir_p($secure_dir); }
-        $htaccess_path = trailingslashit($secure_dir) . '.htaccess';
-        if (!file_exists($htaccess_path)) { @file_put_contents($htaccess_path, 'Deny from all'); }
-    }
+    // **REMOVED**: The create_secure_uploads_dir function is now obsolete.
 }
